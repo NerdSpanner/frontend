@@ -1,18 +1,27 @@
 import { useState } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
-import Headerbar from "@/components/layout/Headerbar";
 
-export default function MainLayout({ user, dashboards, children }) {
+/**
+ * MainLayout component wraps the application with a sidebar and topbar.
+ * It accepts user, dashboards, sidebar, and onLogout props and passes
+ * them down to the Sidebar. The sidebar’s collapsed state is managed
+ * locally via a useState hook.
+ */
+export default function MainLayout({ user, dashboards, sidebar, onLogout, children }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar collapsed={sidebarCollapsed} />
-
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        user={user}
+        dashboards={dashboards}
+        sidebarData={sidebar}
+        onLogout={onLogout}
+      />
       <div className="flex flex-col flex-1 overflow-hidden">
-        <Topbar onToggleSidebar={() => setSidebarCollapsed((prev) => !prev)} />
-
+        <Topbar onToggleSidebar={() => setSidebarCollapsed(prev => !prev)} />
         <div className="flex-1 overflow-y-auto p-6 bg-background">
           {children}
         </div>

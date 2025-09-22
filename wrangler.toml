@@ -1,0 +1,12 @@
+name = "nsn-pages"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-07-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+LOCAL_DEV_MODE = "1"     # dev only
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nsdb"
+database_id = "4085587b-fab0-43ca-9b9c-007177d7c2a1"

@@ -1,0 +1,10 @@
+{
+  "componentPath": "src/components/ui",
+  "rsc": false,
+  "typescript": false,
+  "style": "default",
+  "aliases": {
+    "@/components": "./src/components",
+    "@": "./src"
+  }
+}

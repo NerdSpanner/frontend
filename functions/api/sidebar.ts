@@ -19,14 +19,14 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   if (!uid) return new Response("Unauthorized", { status: 401 });
 
   const SQL = `
-WITH
-  -- ===== direct grants =====
-  g_c AS (SELECT TargetID AS CID FROM Permissions WHERE UID=? AND TargetType='CID'),
-  g_l AS (SELECT TargetID AS LID FROM Permissions WHERE UID=? AND TargetType='LID'),
-  g_f AS (SELECT TargetID AS FID FROM Permissions WHERE UID=? AND TargetType='FID'),
-  g_a AS (SELECT TargetID AS AID FROM Permissions WHERE UID=? AND TargetType='AID'),
-  g_v AS (SELECT TargetID AS VID FROM Permissions WHERE UID=? AND TargetType='VID'),
-  g_o AS (SELECT TargetID AS OID FROM Permissions WHERE UID=? AND TargetType='OID'),
+  WITH RECURSIVE
+    -- ===== direct grants =====
+    g_c AS (SELECT TargetID AS CID FROM Permissions WHERE UID=? AND TargetType='CID'),
+    g_l AS (SELECT TargetID AS LID FROM Permissions WHERE UID=? AND TargetType='LID'),
+    g_f AS (SELECT TargetID AS FID FROM Permissions WHERE UID=? AND TargetType='FID'),
+    g_a AS (SELECT TargetID AS AID FROM Permissions WHERE UID=? AND TargetType='AID'),
+    g_v AS (SELECT TargetID AS VID FROM Permissions WHERE UID=? AND TargetType='VID'),
+    g_o AS (SELECT TargetID AS OID FROM Permissions WHERE UID=? AND TargetType='OID'),
 
   -- ===== YOUR visibility (permission-based, parent-dominant) =====
   c_from_l AS (SELECT DISTINCT L.CID FROM Locations  L JOIN g_l ON g_l.LID=L.LID),
@@ -100,74 +100,68 @@ WITH
 
   your_oracles AS (SELECT DISTINCT OID FROM g_o),
 
-  -- ===== PUBLIC visibility (inherit privacy from ancestors) =====
-  public_companies  AS (
-    SELECT CID FROM Companies WHERE Privacy=0
+  -- ===== PUBLIC visibility (inherit privacy recursively for companies and locations) =====
+  -- Start with companies explicitly marked public and recursively include their descendant companies via CIDparent
+  public_companies (CID) AS (
+    SELECT CID FROM Companies WHERE Privacy = 0
+    UNION ALL
+    SELECT c.CID
+    FROM Companies c
+    JOIN public_companies pc ON c.CIDparent = pc.CID
   ),
-  public_locations  AS (
-    -- locations with explicit public flag
-    SELECT LID FROM Locations WHERE Privacy=0
+  -- Seed public locations: locations explicitly public or belonging to any public company
+  public_locations_seed (LID) AS (
+    SELECT LID FROM Locations WHERE Privacy = 0
     UNION
-    -- locations inheriting from public companies
-    SELECT L.LID
-    FROM Locations L
-    JOIN public_companies PC ON PC.CID = L.CID
+    SELECT L.LID FROM Locations L JOIN public_companies pc ON L.CID = pc.CID
   ),
-  public_fleets     AS (
-    -- fleets with explicit public flag
+  -- Recursively include locations whose parent location is public via LIDparent
+  public_locations (LID) AS (
+    SELECT LID FROM public_locations_seed
+    UNION ALL
+    SELECT l.LID
+    FROM Locations l
+    JOIN public_locations pl ON l.LIDparent = pl.LID
+  ),
+  public_fleets AS (
+    -- fleets explicitly public
     SELECT FID FROM Fleets WHERE Privacy=0
     UNION
     -- fleets inheriting from public companies
     SELECT F.FID
-    FROM Fleets F JOIN public_companies PC ON PC.CID = F.CID
+    FROM Fleets F JOIN public_companies pc ON pc.CID = F.CID
     UNION
     -- fleets inheriting from public locations
     SELECT F.FID
-    FROM Fleets F JOIN public_locations PL ON PL.LID = F.LID
+    FROM Fleets F JOIN public_locations pl ON pl.LID = F.LID
   ),
-  public_assets     AS (
-    -- assets with explicit public flag
+  public_assets AS (
     SELECT AID FROM Assets WHERE Privacy=0
     UNION
-    -- assets inheriting from public companies
     SELECT A.AID
-    FROM Assets A JOIN public_companies PC ON PC.CID = A.CID
+    FROM Assets A JOIN public_companies pc ON pc.CID = A.CID
     UNION
-    -- assets inheriting from public locations
     SELECT A.AID
-    FROM Assets A JOIN public_locations PL ON PL.LID = A.LID
+    FROM Assets A JOIN public_locations pl ON pl.LID = A.LID
     UNION
-    -- assets inheriting from public fleets
     SELECT A.AID
-    FROM Assets A JOIN public_fleets PF ON PF.FID = A.FID
+    FROM Assets A JOIN public_fleets pf ON pf.FID = A.FID
   ),
-  public_variables  AS (
-    -- variables with explicit public flag
+  public_variables AS (
     SELECT VID FROM Variables WHERE Privacy=0
     UNION
-    -- variables inheriting from public assets
-    SELECT V.VID
-    FROM Variables V JOIN public_assets PA ON PA.AID = V.AID
+    SELECT V.VID FROM Variables V JOIN public_assets pa ON pa.AID = V.AID
   ),
-  public_oracles    AS (
-    -- oracles with explicit public flag
+  public_oracles AS (
     SELECT OID FROM Oracles WHERE Privacy=0
     UNION
-    -- oracles inheriting from public companies
-    SELECT O.OID
-    FROM Oracles O JOIN public_companies PC ON PC.CID = O.CID
+    SELECT O.OID FROM Oracles O JOIN public_companies pc ON pc.CID = O.CID
     UNION
-    -- oracles inheriting from public locations
-    SELECT O.OID
-    FROM Oracles O JOIN public_locations PL ON PL.LID = O.LID
+    SELECT O.OID FROM Oracles O JOIN public_locations pl ON pl.LID = O.LID
     UNION
-    -- oracles inheriting from public fleets
-    SELECT O.OID
-    FROM Oracles O JOIN public_fleets PF ON PF.FID = O.FID
+    SELECT O.OID FROM Oracles O JOIN public_fleets pf ON pf.FID = O.FID
     UNION
-    -- oracles inheriting from public assets
-    SELECT O.OID
-    FROM Oracles O JOIN public_assets PA ON PA.AID = O.AID
+    SELECT O.OID FROM Oracles O JOIN public_assets pa ON pa.AID = O.AID
   )
 
 SELECT

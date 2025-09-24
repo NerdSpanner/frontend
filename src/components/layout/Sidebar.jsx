@@ -1,269 +1,373 @@
-// src/components/layout/Sidebar.jsx
+// Sidebar.jsx (patched)
+// - Scope dropdown (Private/Public) with dividers
+// - Headings: Home, Dashboards, Hardware, Variables, Hierarchy
+// - Consistent behavior for Fleets (no special-casing)
+// - Hide items with 0 count; show top-5 lists for Dashboards/Variables when provided
+// - Default to Public when no private data
+// - Bottom status strip with uptime counts (graceful "Network unavailable")
+
 import {
   FaChevronDown,
   FaChevronUp,
-  FaChevronLeft,
+  FaHome,
   FaDatabase,
+  FaMicrochip,
+  FaSitemap,
+  FaListUl,
+  FaLock,
+  FaUnlock,
   FaWifi,
   FaLink,
   FaServer,
-  FaHome,
-  FaListUl,
-  FaSlidersH,
-  FaSitemap,
-  FaBuilding,
-  FaMapMarkerAlt,
-  FaTruck,
-  FaBoxes,
-  FaLock,
-  FaUser
 } from "react-icons/fa";
 import { useEffect, useMemo, useState } from "react";
 import classNames from "classnames";
 
-const ICONS = {
-  Home: FaHome,
-  LayoutDashboard: FaListUl,
-  Sliders: FaSlidersH,
-  Building2: FaBuilding,
-  MapPin: FaMapMarkerAlt,
-  Truck: FaTruck,
-  Boxes: FaBoxes,
-  Database: FaDatabase,
-  Wifi: FaWifi,
-  Link: FaLink,
-  Server: FaServer,
-};
+// ---- Env detection (match App.jsx dev/prod headers)
+const AUTH_DISABLED = import.meta.env.VITE_AUTH_DISABLED === "true";
+const API_BASE = import.meta.env.VITE_API_BASE || "/api"; // Pages Functions base
+const DEV_UID = String(import.meta.env.VITE_FAKE_UID || "dev");
 
-function ItemRow({ item, collapsed, onShowTop5, scope }) {
-  const Icon = ICONS[item.icon] || FaListUl;
-  const showable = item.key.includes("dashboards") || item.key.includes("variables");
-  const count = item.count ?? 0;
-  const disabled = item.disabled || count === 0;
+// Optional external uptime API (public tunnel or local)
+const UPTIME_API = (import.meta.env.VITE_UPTIME_API || "https://nerdspanner.online").replace(/\/+$/, "");
 
-  return (
-    <div
-      className={classNames(
-        "flex items-center justify-between px-3 py-2 rounded-md text-sm",
-        disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-muted transition"
-      )}
-      onClick={() => {
-        if (!disabled && showable) onShowTop5?.(item);
-      }}
-    >
-      <span className="flex items-center gap-2">
-        <Icon />
-        {!collapsed && item.label}
-      </span>
-      {!collapsed && (
-        <div className="flex items-center gap-2">
-          {count !== undefined && <span className="text-xs text-muted-foreground">{count}</span>}
-          {showable && count > 0 && (
-            <button
-              className="text-[11px] px-2 py-0.5 rounded border border-[--color-border] hover:bg-background"
-              onClick={(e) => {
-                e.stopPropagation();
-                onShowTop5?.(item);
-              }}
-            >
-              Show
-            </button>
-          )}
-          {disabled && <FaLock className="text-muted-foreground" />}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function GroupBlock({ group, collapsed, expanded, toggleGroup, onShowTop5, scope }) {
-  const hasItems = (group.items || []).length > 0;
-  const GroupIcon = group.icon ? (ICONS[group.icon] || FaDatabase) : null;
-
-  return (
-    <div className={classNames("mb-4", collapsed && "text-center")}>
-      <div
-        className={classNames(
-          "flex items-center justify-between px-2 py-2 rounded-md",
-          hasItems ? "cursor-pointer hover:bg-muted transition" : ""
-        )}
-        onClick={() => hasItems && toggleGroup(group.key)}
-      >
-        <div className="flex items-center gap-2 text-xs uppercase font-medium text-muted-foreground">
-          {GroupIcon && <GroupIcon className="opacity-70" />}
-          {!collapsed && group.label}
-        </div>
-        {!collapsed && hasItems && (expanded ? <FaChevronUp /> : <FaChevronDown />)}
-      </div>
-
-      {!collapsed && expanded && hasItems && (
-        <ul className="mt-1 space-y-1">
-          {group.items.map((it) => (
-            <li key={it.key}>
-              <ItemRow item={it} collapsed={collapsed} onShowTop5={onShowTop5} scope={scope} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
+// Shared fetch that mirrors App.jsx behavior
+async function fetchJSON(path, token = "") {
+  const headers = {};
+  if (AUTH_DISABLED) {
+    headers["x-dev-uid"] = DEV_UID;
+  } else if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  const res = await fetch(`${API_BASE}${path}`, { headers });
+  if (!res.ok) throw new Error(`${path} ${res.status}`);
+  return res.json();
 }
 
 function Divider() {
-  return <div className="my-3 border-t border-[--color-border] opacity-70" />;
+  return <div className="my-2 border-t border-[--color-border] opacity-70" />;
 }
 
-export default function Sidebar({ collapsed = false, sidebar, onScopeChange, scope = "your" }) {
-  const [openGroups, setOpenGroups] = useState({
-    ynHome: true, ynDashboards: true, ynHardware: true, ynVariables: true, ynHierarchy: true,
-    pnHome: true, pnDashboards: true, pnHardware: true, pnVariables: true, pnHierarchy: true,
+function SectionHeader({ children }) {
+  return (
+    <p className="text-xs uppercase font-medium text-muted-foreground px-2 mb-1">
+      {children}
+    </p>
+  );
+}
+
+function Collapsible({ id, icon: Icon, label, startOpen = false, children, onToggle }) {
+  const [open, setOpen] = useState(startOpen);
+  return (
+    <div className="mb-2">
+      <button
+        className="w-full flex items-center justify-between px-3 py-2 rounded-md hover:bg-muted transition text-sm"
+        onClick={() => {
+          setOpen(!open);
+          onToggle?.(!open);
+        }}
+      >
+        <span className="flex items-center gap-2">
+          <Icon />
+          {label}
+        </span>
+        {open ? <FaChevronUp /> : <FaChevronDown />}
+      </button>
+      {open && <div className="ml-4 mt-1">{children}</div>}
+    </div>
+  );
+}
+
+function ItemRow({ label, count, icon: Icon, disabled, onClick }) {
+  if (count === 0) return null; // hide zero-counts per request
+  return (
+    <div
+      className={classNames(
+        "flex items-center justify-between text-sm px-2 py-1 rounded hover:bg-muted cursor-pointer",
+        disabled && "opacity-50 cursor-not-allowed"
+      )}
+      onClick={() => !disabled && onClick?.()}
+    >
+      <span className="flex items-center gap-2">
+        {Icon && <Icon />}
+        {label}
+      </span>
+      {typeof count === "number" && <span className="text-xs text-muted-foreground">{count}</span>}
+    </div>
+  );
+}
+
+export default function Sidebar() {
+  // Sidebar data from API (/api/sidebar)
+  const [sbar, setSbar] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [scope, setScope] = useState(/** 'private' | 'public' */ "private");
+  const [error, setError] = useState(null);
+
+  // Uptime summary (bottom strip)
+  const [uptime, setUptime] = useState(null);
+  const [uptimeErr, setUptimeErr] = useState(null);
+
+  // Local expansion memory
+  const [open, setOpen] = useState({
+    home: true,
+    dashboards: true,
+    hardware: true,
+    variables: true,
+    hierarchy: true,
   });
 
-  const [drawer, setDrawer] = useState({ kind: null, items: [], total: 0 });
+  // Load sidebar data (independent of App.jsx so this works even if MainLayout didn’t pass it down)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await fetchJSON("/sidebar");
+        if (cancelled) return;
 
-  // When scope changes externally, close any drawer
-  useEffect(() => { setDrawer({ kind: null, items: [], total: 0 }); }, [scope]);
+        setSbar(data);
 
-  const currentSection = useMemo(() => {
-    if (!sidebar?.sections) return null;
+        // If no private data at all, default to public
+        const yourCounts = (() => {
+          try {
+            const your = data.sections?.find((s) => s.key === "your");
+            const totals = { n: 0 };
+            if (your?.groups) {
+              for (const g of your.groups) {
+                for (const it of g.items || []) {
+                  if (typeof it.count === "number") totals.n += it.count;
+                }
+              }
+            }
+            return totals.n;
+          } catch {
+            return 0;
+          }
+        })();
+
+        if (yourCounts === 0) setScope("public");
+      } catch (e) {
+        if (!cancelled) {
+          setError(String(e));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load uptime summary for the strip; tolerate failure
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setUptimeErr(null);
+        const res = await fetch(`${UPTIME_API}/v1/heartbeat/summary`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`uptime ${res.status}`);
+        const js = await res.json();
+        if (!cancelled) setUptime(js);
+      } catch (e) {
+        if (!cancelled) setUptimeErr(String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const activeSection = useMemo(() => {
+    if (!sbar?.sections) return null;
     const key = scope === "public" ? "public" : "your";
-    return sidebar.sections.find((s) => s.key === key) || null;
-  }, [sidebar, scope]);
+    return sbar.sections.find((s) => s.key === key) || null;
+  }, [sbar, scope]);
 
-  const toggleGroup = (k) => setOpenGroups((p) => ({ ...p, [k]: !p[k] }));
-
-  async function loadTop5(kind) {
-    try {
-      const qp = new URLSearchParams({ kind, scope, limit: "5" }).toString();
-      const res = await fetch(`/api/list?${qp}`);
-      const json = await res.json();
-      setDrawer({ kind, items: json.items || [], total: json.total || 0 });
-    } catch (e) {
-      console.error(e);
-      setDrawer({ kind, items: [], total: 0 });
-    }
+  // Helpers to get counts & optional “top 5” lists if API provides them
+  function findGroup(key) {
+    if (!activeSection?.groups) return null;
+    return activeSection.groups.find((g) => g.key === key) || null;
   }
 
-  function handleShowTop5(item) {
-    if (item.key.includes("dashboards")) return loadTop5("dashboards");
-    if (item.key.includes("variables"))  return loadTop5("variables");
+  // Try to read optional lists:
+  // Expect shapes like: group.items contains { key, label, count }
+  // And optionally group.top?.dashboards / group.top?.variables arrays of {name,id}
+  const dashboardsGroup = useMemo(() => {
+    // private: data -> dashboards; public: data_pub -> dashboards_pub
+    return findGroup(scope === "public" ? "data_pub" : "data");
+  }, [activeSection, scope]);
+
+  const variablesGroup = useMemo(() => {
+    return findGroup(scope === "public" ? "data_pub" : "data");
+  }, [activeSection, scope]);
+
+  const hardwareGroup = useMemo(() => {
+    return findGroup(scope === "public" ? "hardware_pub" : "hardware") || findGroup(scope === "public" ? "hierarchy_pub" : "hierarchy"); // fallback if API didn’t split
+  }, [activeSection, scope]);
+
+  const hierarchyGroup = useMemo(() => {
+    return findGroup(scope === "public" ? "hierarchy_pub" : "hierarchy");
+  }, [activeSection, scope]);
+
+  // Extract counts by item key if available
+  function countByKey(g, key, altKey) {
+    if (!g?.items) return undefined;
+    const it = g.items.find((x) => x.key === key || x.key === altKey);
+    return typeof it?.count === "number" ? it.count : undefined;
   }
 
-  // Scope dropdown
-  const scopeLabel = scope === "public" ? "Public Network" : "Your Network";
+  // Compute hardware counts using item keys (standardized in your /api/sidebar)
+  const hwCounts = useMemo(() => {
+    const g = hardwareGroup;
+    return {
+      oracles: countByKey(g, scope === "public" ? "oracles_pub" : "oracles"),
+      loggers: countByKey(g, scope === "public" ? "loggers_pub" : "loggers"),
+      nodes:   countByKey(g, scope === "public" ? "nodes_pub"   : "nodes"),
+    };
+  }, [hardwareGroup, scope]);
+
+  const dataCounts = useMemo(() => {
+    const g = dashboardsGroup;
+    return {
+      dashboards: countByKey(g, scope === "public" ? "dashboards_pub" : "dashboards"),
+      variables:  countByKey(variablesGroup, scope === "public" ? "variables_pub" : "variables") ??
+                  countByKey(hierarchyGroup, scope === "public" ? "variables_pub2" : "variables_h"),
+    };
+  }, [dashboardsGroup, variablesGroup, hierarchyGroup, scope]);
+
+  const hierCounts = useMemo(() => {
+    const g = hierarchyGroup;
+    return {
+      companies: countByKey(g, scope === "public" ? "companies_pub" : "companies"),
+      locations: countByKey(g, scope === "public" ? "locations_pub" : "locations"),
+      fleets:    countByKey(g, scope === "public" ? "fleets_pub"    : "fleets"),
+      assets:    countByKey(g, scope === "public" ? "assets_pub"    : "assets"),
+      variables: countByKey(g, scope === "public" ? "variables_pub2": "variables_h"),
+    };
+  }, [hierarchyGroup, scope]);
+
+  // Optional top lists (show only if the API provides any names)
+  const topDashboards = useMemo(() => {
+    const tops = dashboardsGroup?.top?.dashboards || dashboardsGroup?.dashboards || []; // accept either shape
+    return Array.isArray(tops) ? tops.slice(0, 5) : [];
+  }, [dashboardsGroup]);
+
+  const topVariables = useMemo(() => {
+    const tops = variablesGroup?.top?.variables || variablesGroup?.variables || [];
+    return Array.isArray(tops) ? tops.slice(0, 5) : [];
+  }, [variablesGroup]);
 
   return (
-    <aside className={classNames(
-      "h-screen border-r text-foreground p-3 transition-all flex flex-col",
-      collapsed ? "w-16" : "w-72",
-      "bg-[--color-sidebar] border-[--color-border]"
-    )}>
-      {/* Logo / top */}
-      <div className="flex items-center justify-between mb-3 px-1 shrink-0">
-        {!collapsed && <img src="/nsn1_md.png" alt="Logo" className="h-10 w-auto" />}
-        {collapsed && <img src="/favicon.png" alt="favicon" className="h-auto w-auto pt-1" />}
+    <aside className="w-64 h-screen border-r text-foreground p-3 bg-[--color-sidebar] border-[--color-border] flex flex-col">
+      {/* Brand */}
+      <div className="flex items-center justify-between mb-3 px-1">
+        <img src="/nsn1_md.png" alt="Logo" className="h-10 w-auto" />
       </div>
 
-      {/* Scope switcher with divider above/below */}
+      {/* Scope selector with dividers */}
       <Divider />
-      <div className={classNames("px-1 mb-2", collapsed && "text-center")}>
-        <details className="group">
-          <summary className="flex items-center justify-between cursor-pointer text-sm px-2 py-2 rounded-md hover:bg-muted">
-            <span>{scopeLabel}</span>
-            <FaChevronDown className="transition-transform group-open:rotate-180" />
-          </summary>
-          {!collapsed && (
-            <div className="mt-2 space-y-1 text-sm">
-              <button
-                className={classNames(
-                  "w-full text-left px-2 py-1 rounded hover:bg-muted",
-                  scope === "your" && "bg-muted"
-                )}
-                onClick={() => onScopeChange?.("your")}
-              >Your Network</button>
-              <button
-                className={classNames(
-                  "w-full text-left px-2 py-1 rounded hover:bg-muted",
-                  scope === "public" && "bg-muted"
-                )}
-                onClick={() => onScopeChange?.("public")}
-              >Public Network</button>
-            </div>
-          )}
-        </details>
-      </div>
-      <Divider />
-
-      {/* Groups */}
-      <div className="flex-1 overflow-y-auto">
-        {currentSection?.groups?.map((g) => (
-          <GroupBlock
-            key={g.key}
-            group={g}
-            collapsed={collapsed}
-            expanded={openGroups[g.key]}
-            toggleGroup={toggleGroup}
-            onShowTop5={handleShowTop5}
-            scope={scope}
-          />
-        ))}
-
-        {/* Drawer for top-5 lists */}
-        {!collapsed && drawer.kind && (
-          <div className="mt-2 mx-2 rounded-lg border border-[--color-border] bg-background">
-            <div className="px-3 py-2 text-xs uppercase font-medium text-muted-foreground border-b border-[--color-border]">
-              Top {Math.min(5, drawer.total)} {drawer.kind}
-              {drawer.total > 5 && <span className="ml-2 normal-case text-[11px] text-muted-foreground">(+{drawer.total - 5} more)</span>}
-            </div>
-            <ul className="p-2 text-sm">
-              {(drawer.items || []).map((it) => (
-                <li key={it.id} className="px-2 py-1 rounded hover:bg-muted cursor-pointer">{it.name}</li>
-              ))}
-              {drawer.total === 0 && <li className="px-2 py-1 text-muted-foreground">None found</li>}
-            </ul>
-          </div>
-        )}
-      </div>
-
-      {/* Bottom metrics panel */}
-      <div className="mt-3 shrink-0">
-        <Divider />
-        {!collapsed && (
-          <div className="px-2 py-2">
-            <p className="text-xs uppercase font-medium text-muted-foreground mb-2">Live Hardware</p>
-            <div className="grid grid-cols-3 gap-2">
-              {/* Nodes */}
-              <div className="rounded-lg border border-[--color-border] bg-background p-2 text-center">
-                <div className="flex items-center justify-center gap-1 text-sm"><FaServer /> Nodes</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {sidebar?.metrics?.online?.nodes ?? "—"}<span className="mx-1">/</span>{sidebar?.metrics?.totals?.nodes ?? 0}
-                </div>
-              </div>
-              {/* Oracles */}
-              <div className="rounded-lg border border-[--color-border] bg-background p-2 text-center">
-                <div className="flex items-center justify-center gap-1 text-sm"><FaLink /> Oracles</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {sidebar?.metrics?.online?.oracles ?? "—"}<span className="mx-1">/</span>{sidebar?.metrics?.totals?.oracles ?? 0}
-                </div>
-              </div>
-              {/* Loggers */}
-              <div className="rounded-lg border border-[--color-border] bg-background p-2 text-center">
-                <div className="flex items-center justify-center gap-1 text-sm"><FaWifi /> Loggers</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {sidebar?.metrics?.online?.loggers ?? "—"}<span className="mx-1">/</span>{sidebar?.metrics?.totals?.loggers ?? 0}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* User bar */}
-        <div className="px-3 py-3 text-sm text-muted-foreground border-t border-[--color-border]">
-          <div className="flex items-center gap-2">
-            <FaUser />
-            {!collapsed && <span>Signed in</span>}
+      <div className="px-2 mb-2">
+        <label className="text-xs uppercase font-medium text-muted-foreground block mb-1">Scope</label>
+        <div className="relative">
+          <select
+            className="w-full text-sm bg-background border border-[--color-border] rounded px-3 py-2 pr-8"
+            value={scope}
+            onChange={(e) => setScope(e.target.value)}
+          >
+            <option value="private">Private</option>
+            <option value="public">Public</option>
+          </select>
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
+            {scope === "public" ? <FaUnlock /> : <FaLock />}
           </div>
         </div>
+      </div>
+      <Divider />
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto">
+        {loading && <div className="px-2 py-1 text-sm text-muted-foreground">Loading…</div>}
+        {error && <div className="px-2 py-1 text-sm text-red-600">Sidebar error: {String(error)}</div>}
+
+        {/* Home */}
+        <SectionHeader>Home</SectionHeader>
+        <div className="mb-3">
+          <ItemRow label="Dashboard Overview" icon={FaHome} onClick={() => { /* route */ }} />
+        </div>
+
+        {/* Dashboards */}
+        <SectionHeader>Dashboards</SectionHeader>
+        <Collapsible id="dashboards" icon={FaDatabase} label="Dashboards" startOpen={true}>
+          <ItemRow label="All" count={dataCounts.dashboards} icon={FaListUl} onClick={() => {}} />
+          {/* Top 5 only if any exist */}
+          {topDashboards.length > 0 && (
+            <div className="mt-1 ml-1">
+              {topDashboards.map((d, i) => (
+                <ItemRow key={d.id || d.DID || d.name || i} label={d.name || d.Name || `Dashboard ${i+1}`} onClick={() => {}} />
+              ))}
+              <ItemRow label="See more…" onClick={() => {}} />
+            </div>
+          )}
+        </Collapsible>
+
+        {/* Hardware */}
+        <SectionHeader>Hardware</SectionHeader>
+        <Collapsible id="hardware" icon={FaDatabase} label="Hardware" startOpen={true}>
+          <ItemRow label="Oracles" count={hwCounts.oracles} icon={FaLink} onClick={() => {}} />
+          <ItemRow label="Loggers" count={hwCounts.loggers} icon={FaWifi} onClick={() => {}} />
+          <ItemRow label="Nodes"   count={hwCounts.nodes}   icon={FaServer} onClick={() => {}} />
+        </Collapsible>
+
+        {/* Variables */}
+        <SectionHeader>Variables</SectionHeader>
+        <Collapsible id="variables" icon={FaListUl} label="Variables" startOpen={true}>
+          <ItemRow label="All" count={dataCounts.variables} onClick={() => {}} />
+          {topVariables.length > 0 && (
+            <div className="mt-1 ml-1">
+              {topVariables.map((v, i) => (
+                <ItemRow key={v.id || v.VID || v.name || i} label={v.name || v.VarName || `Variable ${i+1}`} onClick={() => {}} />
+              ))}
+              <ItemRow label="See more…" onClick={() => {}} />
+            </div>
+          )}
+        </Collapsible>
+
+        {/* Hierarchy */}
+        <SectionHeader>Hierarchy</SectionHeader>
+        <Collapsible id="hierarchy" icon={FaSitemap} label="Hierarchy" startOpen={true}>
+          <ItemRow label="Companies" count={hierCounts.companies} onClick={() => {}} />
+          <ItemRow label="Locations" count={hierCounts.locations} onClick={() => {}} />
+          <ItemRow label="Fleets"    count={hierCounts.fleets}    onClick={() => {}} />
+          <ItemRow label="Assets"    count={hierCounts.assets}    onClick={() => {}} />
+          <ItemRow label="Variables" count={hierCounts.variables} onClick={() => {}} />
+        </Collapsible>
+      </div>
+
+      {/* Bottom status strip */}
+      <div className="mt-2 pt-2 border-t border-[--color-border]">
+        <div className="px-2 text-xs uppercase font-medium text-muted-foreground mb-1">Network Status</div>
+        {uptimeErr && (
+          <div className="px-2 py-1 text-sm text-muted-foreground italic">Network unavailable</div>
+        )}
+        {!uptimeErr && (
+          <div className="px-2 grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg bg-background border border-[--color-border] p-2">
+              <div className="text-[10px] uppercase text-muted-foreground">Nodes</div>
+              <div className="text-sm font-semibold">{uptime?.counts?.node?.online ?? 0} / {uptime?.counts?.node?.total ?? 0}</div>
+            </div>
+            <div className="rounded-lg bg-background border border-[--color-border] p-2">
+              <div className="text-[10px] uppercase text-muted-foreground">Oracles</div>
+              <div className="text-sm font-semibold">{uptime?.counts?.oracle?.online ?? 0} / {uptime?.counts?.oracle?.total ?? 0}</div>
+            </div>
+            <div className="rounded-lg bg-background border border-[--color-border] p-2">
+              <div className="text-[10px] uppercase text-muted-foreground">Loggers</div>
+              <div className="text-sm font-semibold">{uptime?.counts?.logger?.online ?? 0} / {uptime?.counts?.logger?.total ?? 0}</div>
+            </div>
+          </div>
+        )}
       </div>
     </aside>
   );

@@ -10,10 +10,16 @@ export function ThemeToggle() {
 
   return (
     <button
-      className="bg-gray-300 dark:bg-gray-700 text-sm px-4 py-2 rounded"
+      type="button"
+      aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+      className={[
+        "inline-flex items-center gap-2 text-sm px-3 py-2 rounded-md border",
+        "border-border bg-card text-foreground hover:bg-muted transition-colors"
+      ].join(" ")}
       onClick={() => setDark((prev) => !prev)}
     >
-      {dark ? "🌙 Dark" : "☀️ Light"}
+      <span>{dark ? "🌙" : "☀️"}</span>
+      <span className="hidden sm:inline">{dark ? "Dark" : "Light"}</span>
     </button>
   )
 }

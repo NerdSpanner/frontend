@@ -8,8 +8,19 @@ import {
   FaServer,
   FaListUl,
   FaSitemap,
+  FaGlobe,
+  FaUser,
+  FaChartBar,
+  FaSignOutAlt,
+  FaCog,
+  FaBuilding,
+  FaMapMarkerAlt,
+  FaTruck,
+  FaBoxes,
+  FaSlidersH,
 } from "react-icons/fa";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { getSidebar } from "@/services/sidebar";
 
 // --- small utilities ---------------------------------------------------------
 async function fetchJSON(url, init) {
@@ -38,8 +49,9 @@ function ItemRow({ item, label, count, icon: Icon, onClick }) {
   return (
     <div
       className={[
-        "flex items-center justify-between px-3 py-2 rounded-md text-sm",
-        disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-muted transition",
+        "flex items-center justify-between px-3 py-2 text-xs leading-tight",
+        "border-b border-[--color-border] last:border-b-0",
+        disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-background transition",
       ].join(" ")}
       onClick={() => {
         if (disabled) return;
@@ -55,7 +67,10 @@ function ItemRow({ item, label, count, icon: Icon, onClick }) {
   );
 }
 
-function Collapsible({ id, icon: Icon, label, startOpen = false, onToggle, children }) {
+function Collapsible({ id, icon: Icon, label, startOpen = false, onToggle, children, collapsed = false }) {
+  const [hovered, setHovered] = useState(false);
+  const [popPos, setPopPos] = useState({ top: 0, left: 0 });
+  const btnRef = useRef(null);
   const [open, setOpen] = useState(!!startOpen);
 
   // keep internal state in sync if parent changes `startOpen`
@@ -72,23 +87,53 @@ function Collapsible({ id, icon: Icon, label, startOpen = false, onToggle, child
   };
 
   return (
-    <div className="mb-2">
+    <div className="mb-2 relative">
       <button
+        ref={btnRef}
         type="button"
-        className="w-full flex items-center justify-between px-2 py-2 rounded-md hover:bg-muted text-left"
+        className={[
+          "w-full flex items-center rounded-md hover:bg-muted",
+          collapsed ? "justify-center px-0 py-2" : "justify-between px-2 py-2 text-left",
+        ].join(" ")}
         onClick={toggle}
         aria-expanded={open}
         aria-controls={`collapsible-${id}`}
+        onMouseEnter={() => {
+          if (!collapsed) return;
+          const r = btnRef.current?.getBoundingClientRect();
+          if (r) setPopPos({ top: Math.max(8, r.top), left: r.right + 8 });
+          setHovered(true);
+        }}
+        onMouseLeave={() => collapsed && setHovered(false)}
+        onFocus={() => {
+          if (!collapsed) return;
+          const r = btnRef.current?.getBoundingClientRect();
+          if (r) setPopPos({ top: Math.max(8, r.top), left: r.right + 8 });
+          setHovered(true);
+        }}
+        onBlur={() => collapsed && setHovered(false)}
       >
         <span className="flex items-center gap-2">
           {Icon ? <Icon className="opacity-80" /> : null}
-          <span className="text-sm">{label}</span>
+          {!collapsed && <span className="text-sm">{label}</span>}
         </span>
-        {open ? <FaChevronUp /> : <FaChevronDown />}
+        {!collapsed && (open ? <FaChevronUp /> : <FaChevronDown />)}
       </button>
 
-      {open && (
-        <div id={`collapsible-${id}`} className="mt-1">
+      {open && !collapsed && (
+        <div id={`collapsible-${id}`} className="mt-1 rounded-lg border border-[--color-border] bg-background overflow-hidden">
+          {children}
+        </div>
+      )}
+
+      {collapsed && hovered && (
+        <div
+className="fixed z-[100] w-64 max-h-[70vh] overflow-y-auto rounded-none border border-[--color-border] bg-background shadow-xl p-2"
+          style={{ top: popPos.top, left: popPos.left }}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+        >
+          <div className="text-xs uppercase font-medium text-muted-foreground mb-2">{label}</div>
           {children}
         </div>
       )}
@@ -97,7 +142,7 @@ function Collapsible({ id, icon: Icon, label, startOpen = false, onToggle, child
 }
 
 // --- main component -----------------------------------------------------------
-export default function Sidebar() {
+export default function Sidebar({ collapsed = false, user, onLogout, onSettings }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [sbar, setSbar] = useState(null);
@@ -115,6 +160,20 @@ export default function Sidebar() {
   const [uptime, setUptime] = useState(null);
   const [uptimeErr, setUptimeErr] = useState(null);
 
+  // derived logger color based on online/total
+  const logOnline = Number(uptime?.counts?.logger?.online ?? 0);
+  const logTotal = Number(uptime?.counts?.logger?.total ?? 0);
+  const loggerColor = logTotal === 0
+    ? "text-muted-foreground"
+    : (logOnline === 0
+      ? "text-red-600"
+      : (logOnline === logTotal ? "text-green-600" : "text-amber-600"));
+  const loggerDotClass = logTotal === 0
+    ? "bg-gray-400"
+    : (logOnline === 0
+      ? "bg-red-500"
+      : (logOnline === logTotal ? "bg-green-500" : "bg-amber-500"));
+
   // load sidebar data
   useEffect(() => {
     let cancelled = false;
@@ -122,7 +181,7 @@ export default function Sidebar() {
       try {
         setLoading(true);
         setError(null);
-        const data = await fetchJSON("/sidebar");
+        const data = await getSidebar();
         if (cancelled) return;
         setSbar(data);
 
@@ -244,34 +303,108 @@ export default function Sidebar() {
 
   const scopeLabel = scope === "public" ? "Public Network" : "Your Network";
 
+  const asideClasses = [
+    "h-screen border-r text-foreground bg-[--color-sidebar] border-[--color-border] flex flex-col",
+    collapsed ? "w-14 p-2" : "w-64 p-3",
+  ].join(" ");
+
+  // Brand row classes: center when collapsed, left-align when expanded
+  const brandClasses = [
+    "flex items-center",
+    collapsed ? "justify-center h-11 -mx-2 px-2" : "justify-start h-11 -mx-3 pl-2 pr-3",
+  ].join(" ");
+
   return (
-    <aside className="w-64 h-screen border-r text-foreground p-3 bg-[--color-sidebar] border-[--color-border] flex flex-col">
+    <aside className={asideClasses}>
       {/* Brand */}
-      <div className="flex items-center justify-between mb-3 px-1">
-        <img src="/nsn1_md.png" alt="Logo" className="h-10 w-auto" />
+<div className={brandClasses}>
+<img src={collapsed ? "/favicon.png" : "/nsn1_md.png"} alt="Logo" className={collapsed ? "h-8 w-8 -mt-0.5" : "h-10 w-auto -mt-0.5"} />
       </div>
 
+      {/* User row (expanded) or compact controls (collapsed) */}
+      {collapsed ? (
+<div className="px-0 mt-2 mb-3 flex flex-col items-center justify-center gap-1">
+          {/* Grouped scope toggle (vertical stack) */}
+          <div className="inline-flex flex-col rounded-md bg-muted p-0.5">
+            <button
+              type="button"
+              title="Your Network"
+              aria-label="Your Network"
+              aria-pressed={scope === "your"}
+              onClick={() => setScope("your")}
+              className={[
+                "appearance-none border-0 outline-none px-2 py-1 rounded",
+scope === "your" ? "bg-background text-foreground" : "text-muted-foreground/70 hover:bg-background/50",
+              ].join(" ")}
+            >
+              <FaUser />
+            </button>
+            <button
+              type="button"
+              title="Public Network"
+              aria-label="Public Network"
+              aria-pressed={scope === "public"}
+              onClick={() => setScope("public")}
+              className={[
+                "appearance-none border-0 outline-none px-2 py-1 rounded mt-0.5",
+scope === "public" ? "bg-background text-foreground" : "text-muted-foreground/70 hover:bg-background/50",
+              ].join(" ")}
+            >
+              <FaGlobe />
+            </button>
+          </div>
+        </div>
+      ) : (
+      <div className="px-0 mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-2 truncate">
+          <FaUser className="opacity-80" />
+          <span className="truncate">{user?.email || user?.sub || "Not signed in"}</span>
+        </div>
+        <button className="ml-2 px-2 py-1 text-[11px] rounded border border-[--color-border] hover:bg-muted" onClick={() => onSettings?.()}>Settings</button>
+        <button className="ml-2 px-2 py-1 text-[11px] rounded border border-[--color-border] hover:bg-muted" onClick={onLogout}>Logout</button>
+      </div>
+      )}
+
       {/* Scope switcher */}
-      <div className="px-1 mb-2">
-        <div className="text-xs uppercase font-medium text-muted-foreground mb-1">Scope</div>
-        <div className="grid grid-cols-2 gap-2">
+      {!collapsed && (
+<div className="px-0 mt-1 mb-3">
+        <div className="inline-flex w-full rounded-md bg-background border border-[--color-border] overflow-hidden" role="tablist" aria-label="Scope">
           <button
-            className={["px-2 py-1 rounded border", scope === "your" ? "bg-muted" : ""].join(" ")}
+            type="button"
+            role="tab"
+            aria-selected={scope === "your"}
+            className={[
+              "flex-1 px-3 py-1.5 text-xs flex items-center justify-center gap-1",
+scope === "your" ? "bg-muted text-foreground" : "text-muted-foreground/70 hover:bg-muted/50",
+            ].join(" ")}
             onClick={() => setScope("your")}
             title="Your Network"
           >
-            Your
+            <FaUser className="opacity-80" />
+            <span>Your</span>
           </button>
           <button
-            className={["px-2 py-1 rounded border", scope === "public" ? "bg-muted" : ""].join(" ")}
+            type="button"
+            role="tab"
+            aria-selected={scope === "public"}
+            className={[
+              "flex-1 px-3 py-2 text-xs flex items-center justify-center gap-1",
+scope === "public" ? "bg-muted text-foreground" : "text-muted-foreground/70 hover:bg-muted/50",
+            ].join(" ")}
             onClick={() => setScope("public")}
             title="Public Network"
           >
-            Public
+            <FaGlobe className="opacity-80" />
+            <span>Public</span>
           </button>
         </div>
-        <div className="mt-1 text-[11px] text-muted-foreground">{scopeLabel}</div>
       </div>
+      )}
+      {!collapsed && (
+      <div className="px-0 mt-1 mb-2 text-xs uppercase font-medium text-muted-foreground">
+        {scope === "public" ? "Public Network" : "Your Network"}
+      </div>
+      )}
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
@@ -283,13 +416,13 @@ export default function Sidebar() {
         {loading && <div className="text-sm text-muted-foreground px-2 py-1">Loading…</div>}
 
         {/* Dashboards */}
-        <SectionHeader>Dashboards</SectionHeader>
         <Collapsible
           id="dashboards"
-          icon={FaDatabase}
+          icon={FaChartBar}
           label="Dashboards"
           startOpen={open.dashboards}
           onToggle={(v) => setOpen((p) => ({ ...p, dashboards: v }))}
+          collapsed={collapsed}
         >
           <ItemRow label="All" count={dataCounts.dashboards} icon={FaListUl} onClick={handleItemSelect} />
           {topDashboards.length > 0 && (
@@ -307,13 +440,13 @@ export default function Sidebar() {
         </Collapsible>
 
         {/* Hardware */}
-        <SectionHeader>Hardware</SectionHeader>
         <Collapsible
           id="hardware"
           icon={FaDatabase}
           label="Hardware"
           startOpen={open.hardware}
           onToggle={(v) => setOpen((p) => ({ ...p, hardware: v }))}
+          collapsed={collapsed}
         >
           <ItemRow label="Oracles" count={hwCounts.oracles} icon={FaLink} onClick={handleItemSelect} />
           <ItemRow label="Loggers" count={hwCounts.loggers} icon={FaWifi} onClick={handleItemSelect} />
@@ -321,15 +454,15 @@ export default function Sidebar() {
         </Collapsible>
 
         {/* Variables */}
-        <SectionHeader>Variables</SectionHeader>
         <Collapsible
           id="variables"
           icon={FaListUl}
           label="Variables"
           startOpen={open.variables}
           onToggle={(v) => setOpen((p) => ({ ...p, variables: v }))}
+          collapsed={collapsed}
         >
-          <ItemRow label="All" count={dataCounts.variables} onClick={handleItemSelect} />
+          <ItemRow label="All" count={dataCounts.variables} icon={FaSlidersH} onClick={handleItemSelect} />
           {topVariables.length > 0 && (
             <div className="mt-1 ml-1">
               {topVariables.map((v, i) => (
@@ -337,6 +470,7 @@ export default function Sidebar() {
                   key={v.id || v.VID || v.name || i}
                   item={v}
                   label={v.name || v.VarName || `Variable ${i + 1}`}
+                  icon={FaSlidersH}
                   onClick={handleItemSelect}
                 />
               ))}
@@ -345,51 +479,110 @@ export default function Sidebar() {
         </Collapsible>
 
         {/* Hierarchy */}
-        <SectionHeader>Hierarchy</SectionHeader>
         <Collapsible
           id="hierarchy"
           icon={FaSitemap}
           label="Hierarchy"
           startOpen={open.hierarchy}
           onToggle={(v) => setOpen((p) => ({ ...p, hierarchy: v }))}
+          collapsed={collapsed}
         >
-          <ItemRow label="Companies" count={hierCounts.companies} onClick={handleItemSelect} />
-          <ItemRow label="Locations" count={hierCounts.locations} onClick={handleItemSelect} />
-          <ItemRow label="Fleets" count={hierCounts.fleets} onClick={handleItemSelect} />
-          <ItemRow label="Assets" count={hierCounts.assets} onClick={handleItemSelect} />
-          <ItemRow label="Variables" count={hierCounts.variables} onClick={handleItemSelect} />
+          <ItemRow label="Companies" count={hierCounts.companies} icon={FaBuilding} onClick={handleItemSelect} />
+          <ItemRow label="Locations" count={hierCounts.locations} icon={FaMapMarkerAlt} onClick={handleItemSelect} />
+          <ItemRow label="Fleets" count={hierCounts.fleets} icon={FaTruck} onClick={handleItemSelect} />
+          <ItemRow label="Assets" count={hierCounts.assets} icon={FaBoxes} onClick={handleItemSelect} />
+          <ItemRow label="Variables" count={hierCounts.variables} icon={FaSlidersH} onClick={handleItemSelect} />
         </Collapsible>
       </div>
 
+      {/* Collapsed: user actions at bottom */}
+{collapsed && (
+        <div className="px-0 mb-2 flex flex-col items-center justify-center gap-2">
+          <button
+            type="button"
+            title="Settings"
+            aria-label="Settings"
+            onClick={() => onSettings?.()}
+            className="appearance-none border-0 outline-none p-1.5 rounded text-muted-foreground hover:bg-muted/50"
+          >
+            <FaCog />
+          </button>
+          <button
+            type="button"
+            title="Logout"
+            aria-label="Logout"
+            onClick={onLogout}
+            className="appearance-none border-0 outline-none p-1.5 rounded text-muted-foreground hover:bg-muted/50"
+          >
+            <FaSignOutAlt />
+          </button>
+        </div>
+      )}
+
       {/* Bottom status strip */}
-      <div className="mt-2 pt-2 border-t border-[--color-border]">
-        <div className="px-2 text-xs uppercase font-medium text-muted-foreground mb-1">Network Status</div>
-        {uptimeErr && (
-          <div className="px-2 py-1 text-sm text-muted-foreground italic">Network unavailable</div>
-        )}
-        {!uptimeErr && (
-          <div className="px-2 grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg bg-background border border-[--color-border] p-2">
-              <div className="text-[10px] uppercase text-muted-foreground">Nodes</div>
-              <div className="text-sm font-semibold">
-                {uptime?.counts?.node?.online ?? 0} / {uptime?.counts?.node?.total ?? 0}
-              </div>
+      <div className="mt-2 pt-2 border-t border-[--color-border] -mx-3 px-3">
+        {collapsed ? (
+          <div className="grid grid-rows-3 gap-1 text-center">
+<div className="text-[10px] flex items-center justify-center gap-[4px]">
+              <span className={["inline-block h-2 w-2 rounded-full",
+                (uptime?.counts?.node?.online ?? 0) > 0 ? "bg-green-500" : "bg-red-500"].join(" ")}></span>
+              <span className={(uptime?.counts?.node?.online ?? 0) > 0 ? "text-green-600" : "text-red-600"}>
+{(uptime?.counts?.node?.online ?? 0) > 0 ? 'UP' : 'DN'}
+              </span>
             </div>
-            <div className="rounded-lg bg-background border border-[--color-border] p-2">
-              <div className="text-[10px] uppercase text-muted-foreground">Oracles</div>
-              <div className="text-sm font-semibold">
-                {uptime?.counts?.oracle?.online ?? 0} / {uptime?.counts?.oracle?.total ?? 0}
-              </div>
+            <div className={["text-[10px] font-semibold flex items-center justify-center gap-1", loggerColor].join(" ")}>
+              <span className={["inline-block h-2 w-2 rounded-full", loggerDotClass].join(" ")}></span>
+<span className="tracking-[0.04em]">{logOnline}/{logTotal}</span>
             </div>
-            <div className="rounded-lg bg-background border border-[--color-border] p-2">
-              <div className="text-[10px] uppercase text-muted-foreground">Loggers</div>
-              <div className="text-sm font-semibold">
-                {uptime?.counts?.logger?.online ?? 0} / {uptime?.counts?.logger?.total ?? 0}
-              </div>
+            <div className="text-[10px] flex items-center justify-center gap-[2px]">
+              <span className="inline-block h-2 w-2 rounded-full bg-green-500"></span>
+              <span className="text-green-600">UP</span>
             </div>
           </div>
+        ) : (
+          <>
+            <div className="text-xs uppercase font-medium text-muted-foreground mb-1">Network Status</div>
+            {uptimeErr && (
+              <div className="py-1 text-sm text-muted-foreground italic">Network unavailable</div>
+            )}
+            {!uptimeErr && (
+              <div className="grid grid-cols-3 gap-2 text-center">
+                {/* Nodes */}
+                <div className="rounded-lg bg-background border border-[--color-border] p-3 min-h-16 flex flex-col items-center justify-center">
+                  <div className="text-[10px] uppercase text-muted-foreground">Nodes</div>
+                  <div className={[
+"mt-1 text-sm flex items-center justify-center gap-[4px]",
+                (uptime?.counts?.node?.online ?? 0) > 0
+                  ? "text-green-600 font-semibold"
+                  : "text-red-600 font-semibold",
+                  ].join(" ")}>
+                    <span className={["inline-block h-2 w-2 rounded-full",
+                      (uptime?.counts?.node?.online ?? 0) > 0 ? "bg-green-500" : "bg-red-500"].join(" ")}></span>
+{(uptime?.counts?.node?.online ?? 0) > 0 ? 'UP' : 'DN'}
+                  </div>
+                </div>
+                {/* Loggers (kept as count, centered in the middle) */}
+                <div className="rounded-lg bg-background border border-[--color-border] p-3 min-h-16 flex flex-col items-center justify-center">
+                  <div className="text-[10px] uppercase text-muted-foreground">Loggers</div>
+                  <div className={["mt-1 text-sm font-semibold flex items-center gap-2", loggerColor].join(" ")}>
+                    <span className={["inline-block h-2 w-2 rounded-full", loggerDotClass].join(" ")}></span>
+<span className="tracking-[0.04em]">{logOnline}/{logTotal}</span>
+                  </div>
+                </div>
+                {/* Oracles */}
+                <div className="rounded-lg bg-background border border-[--color-border] p-3 min-h-16 flex flex-col items-center justify-center">
+                  <div className="text-[10px] uppercase text-muted-foreground">Oracles</div>
+                  <div className="mt-1 text-sm font-semibold flex items-center justify-center gap-2 text-green-600">
+                    <span className="inline-block h-2 w-2 rounded-full bg-green-500"></span>
+                    UP
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
+
     </aside>
   );
 }

@@ -8,7 +8,7 @@ import Topbar from "@/components/layout/Topbar";
  * them down to the Sidebar. The sidebar’s collapsed state is managed
  * locally via a useState hook.
  */
-export default function MainLayout({ user, dashboards, sidebar, onLogout, children }) {
+export default function MainLayout({ user, dashboards, sidebar, onLogout, onSettings, children }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   return (
@@ -19,9 +19,10 @@ export default function MainLayout({ user, dashboards, sidebar, onLogout, childr
         dashboards={dashboards}
         sidebarData={sidebar}
         onLogout={onLogout}
+        onSettings={onSettings}
       />
       <div className="flex flex-col flex-1 overflow-hidden">
-        <Topbar onToggleSidebar={() => setSidebarCollapsed(prev => !prev)} />
+        <Topbar onToggleSidebar={() => setSidebarCollapsed(prev => !prev)} onSettings={onSettings} onLogout={onLogout} />
         <div className="flex-1 overflow-y-auto p-6 bg-background">
           {children}
         </div>

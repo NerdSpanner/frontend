@@ -1,0 +1,19 @@
+# Dependencies and build output
+node_modules/
+dist/
+
+# OS junk
+.DS_Store
+
+# Local env and secrets (keep .env.example if you have one)
+.env
+.env.*
+!.env.example
+
+# Wrangler local state and temp bundles
+.wrangler/state/
+.wrangler/tmp/
+
+# Local databases
+*.sqlite
+*.db
